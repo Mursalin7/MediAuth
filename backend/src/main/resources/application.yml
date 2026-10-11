@@ -1,0 +1,41 @@
+spring:
+  config:
+    import: optional:file:../.env.local[.properties]
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/mediauth}
+    username: ${DATABASE_USERNAME:postgres}
+    password: ${DATABASE_PASSWORD:}
+    hikari:
+      # Neon can terminate idle connections; keep the pool lifetime below its limit.
+      max-lifetime: 300000
+      keepalive-time: 60000
+      validation-timeout: 5000
+      connection-timeout: 30000
+  jpa:
+    hibernate:
+      ddl-auto: ${JPA_DDL_AUTO:update}
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+server:
+  port: ${PORT:8080}
+
+app:
+  jwt:
+    # Set JWT_SECRET to enable authentication. No unsafe built-in signing key is used.
+    secret: ${JWT_SECRET:}
+    expiration-ms: 86400000  # 24 hours
+  groq:
+    api-key: ${GROQ_API_KEY:}
+    base-url: https://api.groq.com/openai/v1
+    model: ${GROQ_MODEL:openai/gpt-oss-20b}
+
+logging:
+  level:
+    com.mediauth: INFO
+    org.hibernate.SQL: WARN
