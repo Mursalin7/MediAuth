@@ -37,5 +37,6 @@ app:
 
 logging:
   level:
+    root: INFO
     com.mediauth: INFO
     org.hibernate.SQL: WARN

@@ -8,6 +8,7 @@
 **/node_modules/
 **/target/
 **/build/
+**/logs/
 
 # Local tooling state
 .neon/

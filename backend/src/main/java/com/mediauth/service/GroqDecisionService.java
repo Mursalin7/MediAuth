@@ -66,7 +66,7 @@ public class GroqDecisionService {
                         Map.of("role", "user", "content", prompt)
                 ),
                 "temperature", 0.2,
-                "max_tokens", 512
+                "max_tokens", 2048
         );
 
         WebClient client = WebClient.builder()
@@ -83,11 +83,11 @@ public class GroqDecisionService {
                     .retrieve()
                     .onStatus(HttpStatusCode::isError, response -> response.bodyToMono(String.class)
                             .defaultIfEmpty("No response body")
-                            .map(body -> new GroqApiException(response.statusCode().value(), body)))
+                            .map(body -> new GroqApiException(response.statusCode().value())))
                     .bodyToMono(String.class)
                     .block(java.time.Duration.ofSeconds(55));
         } catch (Exception e) {
-            log.error("Groq request failed for claim {}: {}", claim.getId(), safeErrorMessage(e));
+            log.error("Groq request failed for claim {}: {}", claim.getId(), safeErrorSummary(e));
             persistFallback(claim, "AI service timed out or was unavailable; routed to human review.",
                     List.of("AI response unavailable"), 0.0, "AI service unavailable");
             return;
@@ -96,25 +96,29 @@ public class GroqDecisionService {
         parseAndPersistDecision(claim, rawResponse, precheckFailures);
     }
 
-    private String safeErrorMessage(Throwable error) {
+    private String safeErrorSummary(Throwable error) {
         Throwable current = error;
         while (current != null) {
             if (current instanceof GroqApiException apiError) {
-                return "HTTP " + apiError.statusCode + ": " + apiError.responseBody;
+                return "Groq API returned HTTP " + apiError.statusCode;
             }
             current = current.getCause();
         }
-        return error.getClass().getSimpleName() + ": " + error.getMessage();
+        List<String> exceptionTypes = new ArrayList<>();
+        current = error;
+        while (current != null && exceptionTypes.size() < 5) {
+            exceptionTypes.add(current.getClass().getSimpleName());
+            current = current.getCause();
+        }
+        return "exceptionTypes=" + String.join(" -> ", exceptionTypes);
     }
 
     private static class GroqApiException extends RuntimeException {
         private final int statusCode;
-        private final String responseBody;
 
-        private GroqApiException(int statusCode, String responseBody) {
+        private GroqApiException(int statusCode) {
             super("Groq API returned HTTP " + statusCode);
             this.statusCode = statusCode;
-            this.responseBody = responseBody;
         }
     }
 
@@ -187,16 +191,42 @@ public class GroqDecisionService {
     }
 
     private void parseAndPersistDecision(Claim claim, String rawResponse, List<String> precheckFailures) {
+        String finishReason = "unknown";
+        int contentLength = -1;
         try {
             JsonNode root = objectMapper.readTree(rawResponse);
-            String content = root
-                    .path("choices").get(0)
-                    .path("message")
-                    .path("content")
-                    .asText();
+            JsonNode choices = root.path("choices");
+            if (!choices.isArray() || choices.isEmpty()) {
+                log.warn("Unexpected Groq response for claim {}: choices missing or empty; topLevelFields={}",
+                        claim.getId(), fieldNames(root));
+                persistFallback(claim, "AI response was invalid; routed to human review.",
+                        List.of("Valid AI assessment unavailable"), 0.0, "Malformed AI response");
+                return;
+            }
+
+            JsonNode choice = choices.get(0);
+            finishReason = choice.path("finish_reason").asText("unknown");
+            String content = choice.path("message").path("content").asText("");
+            contentLength = content.length();
+
+            if (!"stop".equals(finishReason)) {
+                log.warn("Unexpected/incomplete Groq response for claim {}: finishReason={}, contentLength={}",
+                        claim.getId(), finishReason, contentLength);
+                persistFallback(claim, "AI response was incomplete or invalid; routed to human review.",
+                        List.of("Valid AI assessment unavailable"), 0.0, "Incomplete AI response");
+                return;
+            }
+
+            if (content.isBlank()) {
+                log.warn("Unexpected Groq response for claim {}: assistant content is empty; finishReason={}",
+                        claim.getId(), finishReason);
+                persistFallback(claim, "AI response was invalid; routed to human review.",
+                        List.of("Valid AI assessment unavailable"), 0.0, "Empty AI response");
+                return;
+            }
 
             // Strip markdown code fences if the model wraps in ```json ... ```
-        content = content.strip();
+            content = content.strip();
             if (content.startsWith("```")) {
                 content = content.replaceAll("```[a-z]*\\n?", "").strip();
                 if (content.endsWith("```")) {
@@ -257,10 +287,19 @@ public class GroqDecisionService {
             historyRepository.save(history);
 
         } catch (Exception e) {
-            log.error("Failed to parse Groq response; routing claim to human review: {}", e.getMessage());
+            log.error("Failed to parse Groq response for claim {}: errorType={}, finishReason={}, contentLength={}",
+                    claim.getId(), e.getClass().getSimpleName(), finishReason, contentLength);
             persistFallback(claim, "AI response was invalid; routed to human review.",
                     List.of("Valid AI assessment unavailable"), 0.0, "Malformed AI response");
         }
+    }
+
+    private List<String> fieldNames(JsonNode node) {
+        List<String> names = new ArrayList<>();
+        if (node.isObject()) {
+            node.fieldNames().forEachRemaining(names::add);
+        }
+        return names;
     }
 
     private void persistFallback(Claim claim, String rationale, List<String> missing, double confidence, String remarks) {

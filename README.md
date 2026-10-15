@@ -118,6 +118,12 @@ mvn spring-boot:run
 # Server starts on http://localhost:8080
 ```
 
+Backend logs are written to the terminal (and to the hosting provider's service
+logs in production). Groq failures log the HTTP status or exception types. If a
+response is malformed or incomplete, diagnostics include its finish reason and
+content length, but not its content, prompt, or API key. This avoids exposing
+health-related claim details in logs.
+
 For local development, copy `.env.local.example` to `.env.local` in the repository root and set the database password, Groq API key, and a unique JWT secret. Never commit `.env.local`.
 
 On first startup, demo data is seeded automatically:
