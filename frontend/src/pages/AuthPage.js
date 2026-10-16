@@ -31,6 +31,17 @@ export default function AuthPage({ initialMode = 'login', onBack }) {
 
   return (
     <div className="auth-wrapper">
+      <div className="auth-content">
+        {loading && mode === 'login' && (
+          <div className="auth-loading-notice" role="status" aria-live="polite">
+            <div className="auth-loading-spinner" aria-hidden="true" />
+            <div>
+              <strong>Waking up secure sign-in</strong>
+              <p>Since the backend is deployed on a free instance of Render.com, the server spins down with inactivity, which can delay requests by 50 seconds or more.</p>
+            </div>
+          </div>
+        )}
+
       <div className="auth-card">
         <div className="auth-logo">
           <h1><span style={{ color: '#5d7545' }}>Medi</span><span style={{ color: '#91ae6e' }}>Auth</span></h1>
@@ -95,6 +106,7 @@ export default function AuthPage({ initialMode = 'login', onBack }) {
             Reviewer: reviewer@example.com / reviewer123
           </div>
         )}
+      </div>
       </div>
     </div>
   );
